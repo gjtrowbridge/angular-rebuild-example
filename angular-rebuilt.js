@@ -65,10 +65,16 @@ Scope.prototype.$$digestOnce = function() {
     var oldValue = watch.last;
     if (!self.$$areEqual(newValue, oldValue, watch.valueEq)) {
       watch.listenerFn(newValue, oldValue, self);
+      //If the watch wants to do shallow checking for arrays/objects,
+      //we need to make a copy of the last value
+      //If we did deep checking with ===, it would always just point to the
+      //same object (unless the ref itself was changed to point elsewhere),
+      //and the watch would be kind of pointless...
       if (watch.valueEq) {
-        watch.last = _.clone
+        watch.last = _.cloneDeep(newValue);
+      } else {
+        watch.last = newValue;
       }
-      watch.last = newValue;
       dirty = true;
     }
   });
@@ -78,6 +84,11 @@ Scope.prototype.$$digestOnce = function() {
 var scope = new Scope();
 scope.firstName = 'Greg';
 scope.counter = 0;
+scope.myObj = {
+  hello: 'World'
+};
+scope.objCounterNoValueEq = 0;
+scope.objCounterValueEq = 0;
 
 // Register watcher for firstName property
 scope.$watch(function(scope) {
@@ -91,6 +102,24 @@ scope.$watch(function(scope) {
 scope.$watch(function(scope) {
   console.log('digest happened!');
 });
+
+// Register a watch for an object that does NOT use valueEq
+// It should never call the attached listener function, even
+// when that object is modified
+scope.$watch(function(scope) {
+  return scope.myObject;
+}, function(newValue, oldValue, scope) {
+  scope.objCounterNoValueEq++;
+});
+
+// Now, register almost that same watch again with valueEq flag ON
+// It should never call the attached listener function, even
+// when that object is modified
+scope.$watch(function(scope) {
+  return scope.myObject;
+}, function(newValue, oldValue, scope) {
+  scope.objCounterValueEq++;
+}, true);
 
 //0
 console.log(scope.counter);
@@ -110,5 +139,18 @@ scope.firstName = 'Bill';
 scope.$digest();
 //2
 console.log(scope.counter);
+
+//0
+console.log(scope.objCounterNoValueEq);
+//0
+console.log(scope.objCounterValueEq);
+scope.myObj.chchchchanges = "this has changed";
+//0
+console.log(scope.objCounterNoValueEq);
+//1
+console.log(scope.objCounterValueEq);
+
+
+
 
 
