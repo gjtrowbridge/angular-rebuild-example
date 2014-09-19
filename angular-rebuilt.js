@@ -21,6 +21,7 @@ Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
     listenerFn: listenerFn || function() {},
     valueEq: !!valueEq
   };
+
   this.$$watchers.push(watcher);
 };
 
@@ -107,7 +108,7 @@ scope.$watch(function(scope) {
 // It should never call the attached listener function, even
 // when that object is modified
 scope.$watch(function(scope) {
-  return scope.myObject;
+  return scope.myObj;
 }, function(newValue, oldValue, scope) {
   scope.objCounterNoValueEq++;
 });
@@ -116,7 +117,7 @@ scope.$watch(function(scope) {
 // It should never call the attached listener function, even
 // when that object is modified
 scope.$watch(function(scope) {
-  return scope.myObject;
+  return scope.myObj;
 }, function(newValue, oldValue, scope) {
   scope.objCounterValueEq++;
 }, true);
@@ -140,16 +141,23 @@ scope.$digest();
 //2
 console.log(scope.counter);
 
-//0
-console.log(scope.objCounterNoValueEq);
-//0
-console.log(scope.objCounterValueEq);
-scope.myObj.chchchchanges = "this has changed";
-//0
+//1
 console.log(scope.objCounterNoValueEq);
 //1
 console.log(scope.objCounterValueEq);
+scope.myObj.chchchchanges = "this has changed";
+scope.$digest();
 
+//1
+console.log(scope.objCounterNoValueEq);
+//2
+console.log(scope.objCounterValueEq);
+scope.myObj.chchchchanges = "and again!";
+scope.$digest();
+scope.$digest();
+scope.$digest();
+//3
+console.log(scope.objCounterValueEq);
 
 
 
