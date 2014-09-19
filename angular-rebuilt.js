@@ -10,7 +10,10 @@ var Scope = function() {
 //watchFn is what returns the value to be checked each digest
 //listenerFn is what runs if the watched value has changed
 //valueEq is a flag determining how to check whether a value has changed
-//(ie. deep equality with ===, or just a shallow equality check for objs/arrays?)
+//(ie. equality with ===, or a deep equality check for objs/arrays?)
+// in actual angular, there is shallow checking that doesn't recurse
+// (which is obviously much more performant than deep checking).
+// this is not implemented here
 
 Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
   var watcher = {
@@ -27,9 +30,13 @@ Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
 
 Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
   if (valueEq) {
+    //NaN issue is handled by loDash already
     return _.isEqual(newValue, oldValue);
   } else {
-    return newValue === oldValue;
+    //Handles NaN as well (only edge case here)
+    return newValue === oldValue ||
+        (typeof newValue === 'number' && typeof oldValue === 'number' &&
+         isNaN(newValue) && isNaN(oldValue));
   }
 }
 
@@ -66,9 +73,9 @@ Scope.prototype.$$digestOnce = function() {
     var oldValue = watch.last;
     if (!self.$$areEqual(newValue, oldValue, watch.valueEq)) {
       watch.listenerFn(newValue, oldValue, self);
-      //If the watch wants to do shallow checking for arrays/objects,
-      //we need to make a copy of the last value
-      //If we did deep checking with ===, it would always just point to the
+      //If the watch wants to do deep checking for arrays/objects,
+      //(without checking if it's the same ref) we need to make a copy of the last value
+      //If we did checking with ===, it would always just point to the
       //same object (unless the ref itself was changed to point elsewhere),
       //and the watch would be kind of pointless...
       if (watch.valueEq) {
