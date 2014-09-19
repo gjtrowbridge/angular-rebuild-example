@@ -1,29 +1,55 @@
-var _ = require('underscore');
+var _ = require('lodash');
 
 var Scope = function() {
   this.$$watchers = [];
 }
 
-Scope.prototype.$watch = function(watchFn, listenerFn) {
+// With how $digest is implemented, watches can clearly be run many times...
+// this means that watch functions should be IDEMPOTENT
+
+//watchFn is what returns the value to be checked each digest
+//listenerFn is what runs if the watched value has changed
+//valueEq is a flag determining how to check whether a value has changed
+//(ie. deep equality with ===, or just a shallow equality check for objs/arrays?)
+
+Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
   var watcher = {
     watchFn: watchFn,
     // Just in case someone wants to register a watcher
     // with no listener (so they want to do something in 
     // just the watch function every digest)
-    listenerFn: listenerFn || function() {}
+    listenerFn: listenerFn || function() {},
+    valueEq: !!valueEq
   };
   this.$$watchers.push(watcher);
 };
+
+Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
+  if (valueEq) {
+    return _.isEqual(newValue, oldValue);
+  } else {
+    return newValue === oldValue;
+  }
+}
 
 //Watch functions usually have a scope object passed in as first arg
 //Their job is usually just to return some value of the scope,
 //so the digest knows whether the value has changed (is "dirty")
 
 // Keeps digesting until no watch fns have changed (until the situation is "stable")
+// Obviously, this can lead to infinite loops if one watchFn is watching something
+// another listenerFn is changing, and they're all looped together somehow
+
+//So usually there is a maximum # of digest loops (called TTL, or Time To Live)
 Scope.prototype.$digest = function() {
+  var ttl = 10;
   var dirty = true;
   while (dirty) {
     dirty = this.$$digestOnce();
+    ttl--;
+    if (dirty && ttl === 0) {
+      throw '10 digest iterations reached!';
+    }
   }
 }
 
@@ -37,8 +63,11 @@ Scope.prototype.$$digestOnce = function() {
   _.forEach(this.$$watchers, function(watch) {
     var newValue = watch.watchFn(self);
     var oldValue = watch.last;
-    if (newValue !== oldValue) {
+    if (!self.$$areEqual(newValue, oldValue, watch.valueEq)) {
       watch.listenerFn(newValue, oldValue, self);
+      if (watch.valueEq) {
+        watch.last = _.clone
+      }
       watch.last = newValue;
       dirty = true;
     }
