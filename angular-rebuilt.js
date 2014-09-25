@@ -2,6 +2,9 @@ var _ = require('lodash');
 
 var Scope = function() {
   this.$$watchers = [];
+  this.$$asyncQueue = [];
+  this.$$postDigestQueue = [];
+  this.$$phase = null;
 }
 
 // With how $digest is implemented, watches can clearly be run many times...
@@ -52,11 +55,32 @@ Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
 Scope.prototype.$digest = function() {
   var ttl = 10;
   var dirty = true;
+  this.$beginPhase('$digest');
   while (dirty) {
+    //Run all queued async code before each digest
+    while (this.$$asyncQueue.length) {
+      try {
+        var asyncTask = this.$$asyncQueue.shift();
+        this.$eval(asyncTask.expression)
+      } catch(e) {
+        (console.error || console.log)(e);
+      }
+    }
     dirty = this.$$digestOnce();
     ttl--;
     if (dirty && ttl === 0) {
       throw '10 digest iterations reached!';
+    }
+  }
+  this.$clearPhase();
+
+  //Run everything in the post digest queue
+  //after digest is over
+  while (this.$$postDigestQueue.length) {
+    try {
+      this.$$postDigestQueue.shift()();
+    } catch(e) {
+      (console.error || console.log)(e);
     }
   }
 }
@@ -69,25 +93,82 @@ Scope.prototype.$$digestOnce = function() {
   var self = this;
   var dirty = false;
   _.forEach(this.$$watchers, function(watch) {
-    var newValue = watch.watchFn(self);
-    var oldValue = watch.last;
-    if (!self.$$areEqual(newValue, oldValue, watch.valueEq)) {
-      watch.listenerFn(newValue, oldValue, self);
-      //If the watch wants to do deep checking for arrays/objects,
-      //(without checking if it's the same ref) we need to make a copy of the last value
-      //If we did checking with ===, it would always just point to the
-      //same object (unless the ref itself was changed to point elsewhere),
-      //and the watch would be kind of pointless...
-      if (watch.valueEq) {
-        watch.last = _.cloneDeep(newValue);
-      } else {
-        watch.last = newValue;
+    try {
+      var newValue = watch.watchFn(self);
+      var oldValue = watch.last;
+      if (!self.$$areEqual(newValue, oldValue, watch.valueEq)) {
+        watch.listenerFn(newValue, oldValue, self);
+        //If the watch wants to do deep checking for arrays/objects,
+        //(without checking if it's the same ref) we need to make a copy of the last value
+        //If we did checking with ===, it would always just point to the
+        //same object (unless the ref itself was changed to point elsewhere),
+        //and the watch would be kind of pointless...
+        if (watch.valueEq) {
+          watch.last = _.cloneDeep(newValue);
+        } else {
+          watch.last = newValue;
+        }
+        dirty = true;
       }
-      dirty = true;
+    } catch(e) {
+      (console.error || console.log)(e);
     }
   });
   return dirty;
 };
+
+//$eval simply executes the provided function,
+//passing the scope in as the first argument
+Scope.prototype.$eval = function(expr, locals) {
+  return expr(this, locals);
+};
+
+//Attempts to execute the function on the scope (with eval)
+//then just runs digest after (regardless of success)
+Scope.prototype.$apply = function(expr) {
+  try {
+    this.$beginPhase('$apply');
+    return this.$eval(expr);
+  } finally {
+    this.$clearPhase();
+    this.$digest();
+  }
+};
+
+//Queues the given function to run AFTER the current digest is complete
+//(so it runs just before the next digest starts)
+//If no digest is currently scheduled, schedule it now
+Scope.prototype.$evalAsync = function(expr) {
+  if (!this.$$phase && !this.$$asyncQueue.length) {
+    setTimeout(function() {
+      if (this.$$asyncQueue.length) {
+        this.$digest();
+      }
+    }.bind(this), 0);
+  }
+  this.$$asyncQueue.push({scope: this, expression: expr});
+};
+
+//Similar to evalAsync, except that this one adds to a queue
+//that gets run AFTER the next digest completes (and does not
+//schedule a digest if one is not currently happening)
+Scope.prototype.$$postDigest = function(expr) {
+  this.$$postDigestQueue.push(expr);
+};
+
+Scope.prototype.$beginPhase = function(phase) {
+  if (this.$$phase) {
+    throw this.$$phase + ' already in progress!';
+  } else {
+    this.$$phase = phase;
+  }
+};
+
+Scope.prototype.$clearPhase = function() {
+  this.$$phase = null;
+};
+
+/* TEST CODE BELOW HERE */
 
 var scope = new Scope();
 scope.firstName = 'Greg';
@@ -104,6 +185,9 @@ scope.$watch(function(scope) {
 }, function(newValue, oldValue, scope) {
   scope.counter++;
 });
+
+
+
 
 // Register watcher that just logs whenever a digest
 // happens
@@ -166,6 +250,15 @@ scope.$digest();
 //3
 console.log(scope.objCounterValueEq);
 
+scope.$evalAsync(function() {
+  console.log('async code');
+});
+
+//Apply example
+scope.$apply(function(scope) {
+  scope.firstName = 'Gregorio!';
+});
 
 
-
+//3
+console.log(scope.counter);
