@@ -1,0 +1,11 @@
+{
+  "name": "MyAngular",
+  "version": "0.0.0",
+  "description": "Following \"Build Your Own Angular\" e-book by teropa",
+  "main": "src/Angular.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Greg Trowbridge",
+  "license": "ISC"
+}
