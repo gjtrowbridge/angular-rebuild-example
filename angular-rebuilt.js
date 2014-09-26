@@ -29,6 +29,12 @@ Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
   };
 
   this.$$watchers.push(watcher);
+  return function() {
+    var index = this.$$watchers.indexOf(watcher);
+    if (index >= 0) {
+      self.$$watchers.splice(index,1);
+    }
+  }.bind(this);
 };
 
 Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
@@ -215,6 +221,15 @@ scope.$watch(function(scope) {
 
 //0
 console.log(scope.counter);
+
+scope.$watch(function() {
+  throw 'watch fail!';
+});
+scope.$watch(function() {
+  scope.$evalAsync(function() {
+    throw 'async fail!';
+  });
+});
 
 //1
 scope.$digest();
