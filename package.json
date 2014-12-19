@@ -1,6 +1,6 @@
 {
   "name": "MyAngular",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Following \"Build Your Own Angular\" e-book by teropa",
   "main": "src/Angular.js",
   "scripts": {
