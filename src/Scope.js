@@ -5,6 +5,7 @@ var initWatchValue = function() {};
 
 var Scope = function() {
   this.$$watchers = [];
+  this.$$lastDirtyWatch = null;
 };
 
 //Adds a watcher and listener to the scope
@@ -20,6 +21,11 @@ Scope.prototype.$watch = function(watchFn, listenerFn) {
   };
 
   this.$$watchers.push(watcher);
+
+  //Reset last dirty watch when a new watch is added...
+  //necessary in cases where a listener adds a new watch
+  //to the digest
+  this.$$lastDirtyWatch = null;
 };
 
 //Checks the scope's watchers to see if any have changed
@@ -34,12 +40,17 @@ Scope.prototype.$$digestOnce = function() {
     var newValue = watcher.watchFn(self);
     var oldValue = watcher.last;
     if (oldValue !== newValue) {
+      //Keep track of last dirty watch so we don't overdigest
+      self.$$lastDirtyWatch = watcher;
+      
       watcher.last = newValue;
       if (oldValue === initWatchValue) {
         oldValue = newValue;
       }
       watcher.listenerFn(newValue, oldValue, self);
       dirty = true;
+    } else if (self.$$lastDirtyWatch === watcher) {
+      return false;
     }
   });
 
@@ -51,6 +62,7 @@ Scope.prototype.$digest = function() {
   var self = this;
   var ttl = 10;
 
+  this.$$lastDirtyWatch = null;
   while (dirty) {
     if (ttl === 0) {
       throw 'No resolution to digest after 10 iterations!';
