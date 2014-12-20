@@ -6,10 +6,11 @@ var initWatchValue = function() {};
 var Scope = function() {
   this.$$watchers = [];
   this.$$lastDirtyWatch = null;
+  this.$$asyncQueue = [];
 };
 
 //Adds a watcher and listener to the scope
-Scope.prototype.$watch = function(watchFn, listenerFn) {
+Scope.prototype.$watch = function(watchFn, listenerFn, valueEq) {
 
   //Note: due to how the digest cycle works, watch functions should be IDEMPOTENT
   //they should have NO side effects, because they may be run a LOT each digest cycle!
@@ -17,6 +18,7 @@ Scope.prototype.$watch = function(watchFn, listenerFn) {
   var watcher = {
     watchFn: watchFn,
     listenerFn: listenerFn || function() {},
+    valueEq: !!valueEq,
     last: initWatchValue
   };
 
@@ -39,15 +41,27 @@ Scope.prototype.$$digestOnce = function() {
   _.forEach(this.$$watchers, function(watcher) {
     var newValue = watcher.watchFn(self);
     var oldValue = watcher.last;
-    if (oldValue !== newValue) {
+    if (!self.$$areEqual(newValue, oldValue, watcher.valueEq)) {
       //Keep track of last dirty watch so we don't overdigest
       self.$$lastDirtyWatch = watcher;
       
-      watcher.last = newValue;
+      //For checking later whether the watch is dirty
+      if (watcher.valueEq) {
+        watcher.last = _.cloneDeep(newValue);
+      } else {
+        watcher.last = newValue;
+      }
+
+      //If the first time, don't send in our "dummy" old value, just send
+      //back the newValue as the oldValue the first time.
       if (oldValue === initWatchValue) {
         oldValue = newValue;
       }
+
+      //Watch is dirty, run the listener
       watcher.listenerFn(newValue, oldValue, self);
+
+      //Need to run all the digests again since at least one watch is dirty
       dirty = true;
     } else if (self.$$lastDirtyWatch === watcher) {
       return false;
@@ -63,11 +77,51 @@ Scope.prototype.$digest = function() {
   var ttl = 10;
 
   this.$$lastDirtyWatch = null;
-  while (dirty) {
+  while (dirty || this.$$asyncQueue.length) {
+    while(this.$$asyncQueue.length) {
+      var asyncTask = this.$$asyncQueue.shift();
+      asyncTask.scope.$eval(asyncTask.expression);
+    }
+
     if (ttl === 0) {
       throw 'No resolution to digest after 10 iterations!';
     }
     ttl--;
     dirty = self.$$digestOnce();
+  }
+
+};
+
+//Starts to become more useful after we implement $apply
+//and for evaluating string expressions
+Scope.prototype.$eval = function(expr, locals) {
+  return expr(this, locals);
+};
+
+Scope.prototype.$evalAsync = function(expr) {
+  this.$$asyncQueue.push({
+    scope: this,
+    expression: expr
+  });
+};
+
+//Standard way to integrate external libraries into Angular
+//Runs eval, then starts the digest cycle
+Scope.prototype.$apply = function(expr, locals) {
+  try {
+    return this.$eval(expr, locals);
+  } finally {
+    this.$digest();
+  }
+};
+
+
+Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
+  if (valueEq) {
+    return _.isEqual(newValue, oldValue);
+  } else {
+    return newValue === oldValue ||
+      (typeof(newValue) === 'number' && typeof(oldValue) === 'number' &&
+        isNaN(newValue) && isNaN(oldValue));
   }
 };
