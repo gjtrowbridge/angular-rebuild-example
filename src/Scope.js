@@ -7,6 +7,9 @@ var Scope = function() {
   this.$$watchers = [];
   this.$$lastDirtyWatch = null;
   this.$$asyncQueue = [];
+  this.$$applyAsyncQueue = [];
+  this.$$applyAsyncId = null;
+  this.$$phase = null;
 };
 
 //Adds a watcher and listener to the scope
@@ -77,6 +80,7 @@ Scope.prototype.$digest = function() {
   var ttl = 10;
 
   this.$$lastDirtyWatch = null;
+  this.$beginPhase('$digest');
   while (dirty || this.$$asyncQueue.length) {
     while(this.$$asyncQueue.length) {
       var asyncTask = this.$$asyncQueue.shift();
@@ -84,12 +88,13 @@ Scope.prototype.$digest = function() {
     }
 
     if (ttl === 0) {
+      this.$clearPhase();
       throw 'No resolution to digest after 10 iterations!';
     }
     ttl--;
     dirty = self.$$digestOnce();
   }
-
+  this.$clearPhase();
 };
 
 //Starts to become more useful after we implement $apply
@@ -98,19 +103,57 @@ Scope.prototype.$eval = function(expr, locals) {
   return expr(this, locals);
 };
 
+//Schedule an eval to run soon
+//Designed to schedule work from inside a digest
+  //Also: If no digest is in progress and there is no async queue,
+  //schedule a digest to run soon
 Scope.prototype.$evalAsync = function(expr) {
-  this.$$asyncQueue.push({
-    scope: this,
+  var self = this;
+  if (!self.$$phase && self.$$asyncQueue.length === 0) {
+    setTimeout(function() {
+      if (self.$$asyncQueue.length) {
+        self.$digest();
+      }
+    }, 0);
+  }
+  self.$$asyncQueue.push({
+    scope: self,
     expression: expr
   });
 };
+
+//Designed like apply--for integrating code that may not be aware of the
+//angular life cycle
+//Schedules to run the code and start a digest soon, but not immediately
+//Designed for handling HTTP requests: maybe you want to run a digest
+//after you get a bunch back (so HTTP requests returning almost at the same time
+//will get processed in the same digest)
+Scope.prototype.$applyAsync = function(expr) {
+  var self = this;
+  self.$$applyAsyncQueue.push(function() {
+    self.$eval(expr);
+  });
+  if (self.$$applyAsyncId === null) {
+    self.$$applyAsyncId = setTimeout(function() {
+      self.$apply(function() {
+        while (self.$$applyAsyncQueue.length) {
+          self.$$applyAsyncQueue.shift()();
+        }
+        self.$$applyAsyncId = null;
+      });
+    }, 0);
+  }
+};
+
 
 //Standard way to integrate external libraries into Angular
 //Runs eval, then starts the digest cycle
 Scope.prototype.$apply = function(expr, locals) {
   try {
+    this.$beginPhase('$apply');
     return this.$eval(expr, locals);
   } finally {
+    this.$clearPhase();
     this.$digest();
   }
 };
@@ -124,4 +167,15 @@ Scope.prototype.$$areEqual = function(newValue, oldValue, valueEq) {
       (typeof(newValue) === 'number' && typeof(oldValue) === 'number' &&
         isNaN(newValue) && isNaN(oldValue));
   }
+};
+
+Scope.prototype.$beginPhase = function(phase) {
+  if (this.$$phase) {
+    throw(this.$$phase + ' is already in progress!');
+  }
+  this.$$phase = phase;
+};
+
+Scope.prototype.$clearPhase = function(phase) {
+  this.$$phase = null;
 };
